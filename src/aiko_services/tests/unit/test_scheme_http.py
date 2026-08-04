@@ -138,16 +138,21 @@ def test_redirect_is_followed():
 
 # --- SSRF guard ----------------------------------------------------------- #
 
-@pytest.mark.parametrize("host,blocked", [
-    ("127.0.0.1", True),        # loopback
-    ("169.254.169.254", True),  # cloud metadata (link-local)
-    ("10.0.0.1", True),         # RFC1918
-    ("192.168.1.1", True),      # RFC1918
-    ("::1", True),              # IPv6 loopback
-    ("8.8.8.8", False),         # public
+@pytest.mark.parametrize("host,ok", [
+    ("127.0.0.1", False),       # loopback
+    ("169.254.169.254", False),  # cloud metadata (link-local)
+    ("10.0.0.1", False),        # RFC1918
+    ("192.168.1.1", False),     # RFC1918
+    ("100.64.0.1", False),      # CGNAT (missed by a hand-rolled blocklist)
+    ("::1", False),             # IPv6 loopback
+    ("8.8.8.8", True),          # public
 ])
-def test_host_is_blocked(host, blocked):
-    assert scheme_http._host_is_blocked(host) is blocked
+def test_resolve_public_ip(host, ok):
+    ip, diagnostic = scheme_http._resolve_public_ip(host)
+    if ok:
+        assert ip is not None and diagnostic is None
+    else:
+        assert ip is None and diagnostic
 
 
 def test_private_host_rejected_by_default(http_server):
@@ -157,7 +162,51 @@ def test_private_host_rejected_by_default(http_server):
     stream.variables["source_urls_generator"] = iter([http_server])
     stream_event, result = scheme.frame_generator(stream, 0)
     assert stream_event == aiko.StreamEvent.ERROR
-    assert "non-public host" in result["diagnostic"]
+    assert "blocked" in result["diagnostic"]
+
+
+def test_pinned_fetch_reaches_validated_ip(http_server, monkeypatch):
+    # Exercise the REAL pinned path (allow_private=False): pretend the host
+    # resolved to a validated public IP, but hand back the loopback IP so the
+    # pinned connection lands on the local test server. Proves the resolve ->
+    # pin -> connect-to-IP + Host-header machinery actually works.
+    monkeypatch.setattr(scheme_http, "_resolve_public_ip",
+                        lambda host: ("127.0.0.1", None))
+    scheme, _ = _make_scheme({"allow_private_addresses": False})
+    stream = _StubStream()
+    stream.variables["source_urls_generator"] = iter([http_server])
+    stream_event, result = scheme.frame_generator(stream, 0)
+    assert stream_event == aiko.StreamEvent.OKAY
+    assert result["records"] == [_BODY]
+
+
+def test_redirect_to_blocked_host_is_rejected(monkeypatch):
+    # hop-1 validates, hop-2 (the Location target) does not -> the per-hop guard
+    # must reject BEFORE contacting hop-2. Pin hop-1 to loopback; block others.
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", "http://blocked.invalid/meta")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server, base = _serve(RedirectHandler)
+
+    def fake_resolve(host):
+        return ("127.0.0.1", None) if host == "127.0.0.1" \
+            else (None, f"non-public {host}")
+    monkeypatch.setattr(scheme_http, "_resolve_public_ip", fake_resolve)
+    try:
+        scheme, _ = _make_scheme({"allow_private_addresses": False})
+        stream = _StubStream()
+        stream.variables["source_urls_generator"] = iter([f"{base}/first"])
+        stream_event, result = scheme.frame_generator(stream, 0)
+        assert stream_event == aiko.StreamEvent.ERROR
+        assert "blocked" in result["diagnostic"]
+    finally:
+        server.shutdown()
 
 
 # --- fail-closed guards --------------------------------------------------- #
