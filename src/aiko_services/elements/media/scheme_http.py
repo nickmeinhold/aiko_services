@@ -96,8 +96,14 @@ class DataSchemeHTTP(aiko.DataScheme):
 
             # Enforce a response-size cap.  Content-Length may be absent or
             # dishonest, so also cap while streaming the body.
+            # Content-Length is attacker/server-controlled and may be absent or
+            # non-numeric -- guard the int parse (a bare int() would raise
+            # ValueError, escaping the requests.RequestException handler and
+            # crashing the pipeline thread).  The streaming cap below is the
+            # real enforcement; this is just an early-out on an honest header.
             content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > _MAX_CONTENT_BYTES:
+            if content_length and content_length.isdigit()  \
+                    and int(content_length) > _MAX_CONTENT_BYTES:
                 return aiko.StreamEvent.ERROR, {"diagnostic":
                     f"HTTP response exceeds {_MAX_CONTENT_BYTES} byte cap"}
 

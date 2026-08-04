@@ -116,6 +116,35 @@ def test_target_is_source_only():
     assert "source-only" in result["diagnostic"]
 
 
+def test_malformed_content_length_does_not_crash():
+    # A server sending a non-numeric Content-Length must not crash the pipeline
+    # thread (bare int() would raise ValueError, escaping the requests handler).
+    class BadLenHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", "not-a-number")
+            self.end_headers()
+            self.wfile.write(_BODY)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), BadLenHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+    try:
+        scheme, _ = _make_scheme()
+        stream = _StubStream()
+        stream.variables["source_urls_generator"] = iter(
+            [f"http://{host}:{port}/x.jpeg"])
+        stream_event, result = scheme.frame_generator(stream, 0)
+        assert stream_event == aiko.StreamEvent.OKAY
+        assert result["records"] == [_BODY]
+    finally:
+        server.shutdown()
+
+
 def test_response_size_cap(http_server, monkeypatch):
     monkeypatch.setattr(scheme_http, "_MAX_CONTENT_BYTES", 4)
     scheme, _ = _make_scheme()
