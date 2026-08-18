@@ -10,6 +10,8 @@ from .scheme_tty import DataSchemeTTY
 
 from .scheme_zmq import DataSchemeZMQ
 
+from .scheme_http import DataSchemeHTTP
+
 from .elements import Mock, NoOp
 
 from .image_io import (
