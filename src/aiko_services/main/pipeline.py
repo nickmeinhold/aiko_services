@@ -1547,17 +1547,17 @@ class PipelineImpl(Pipeline):
                 to_name = f"{out_element}.{to_name}"
                 frame_data_out[to_name] = frame_data_out.pop(from_name)
 
-# FIX: _create_frame_generator(): StreamEvent.ERROR -->
+# FIX: _create_frames_generator(): StreamEvent.ERROR -->
 #          self.destroy_stream(get_stream_id(), graceful=False)  # immediately !
 
 # TODO: Check local cases "stream_state.RUN | STOP | ERROR" ...
-# TODO: - _create_frame_generator()
+# TODO: - _create_frames_generator()
 # TODO: - create_stream()
 # TODO: - _process_frame_common()
 # TODO: - destroy_stream()
 
 # TODO: Check remote cases "stream_state.RUN | STOP | ERROR" ...
-# TODO: - _create_frame_generator()
+# TODO: - _create_frames_generator()
 # TODO: - create_stream()
 # TODO: - _process_frame_common()
 # TODO: - destroy_stream()

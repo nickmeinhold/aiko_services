@@ -276,7 +276,7 @@ do not need an explicit `create_stream`.
   `utilities/metrics.py`.
 - Source TODO checklists: verify StreamState `RUN | STOP | ERROR`
   behavior for both local and remote cases across
-  `_create_frame_generator()`, `create_stream()`,
+  `_create_frames_generator()`, `create_stream()`,
   `_process_frame_common()` and `destroy_stream()`. On generator
   `StreamEvent.ERROR`, destroy the Stream immediately (FIX note).
 - `Stream.set_state()` downgrade guard appears ineffective (see

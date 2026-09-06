@@ -237,9 +237,9 @@ Key design points:
 - `on_enter_primary()` wraps LWT installation in `try/except SystemError`
   — if the MQTT server is unavailable the transition rolls back through
   `primary_failed`.
-- `_service_add()` ignores duplicate `add`s for a known `topic_path`, and
-  re-publishes the *original inbound payload* on `topic_out` rather than
-  regenerating it.
+- `service_add()` ignores duplicate `add`s for a known `topic_path`, and
+  publishes canonical `generate()` output on `topic_out`, not a
+  byte-for-byte echo of the payload of the client.
 - Timestamps (`time_add`, `time_remove`, and the boot announcement's
   `TIME_STARTED`) use `time.monotonic()` — meaningful for ordering within
   a host, not wall-clock time.
@@ -266,7 +266,7 @@ From the source `To Do` list — highlights (the source marks several as
   Registrar from ever becoming primary
 - **BUG**: with multiple secondaries, when the primary fails *all*
   secondaries promote themselves to primary
-- **BUG** (noted at `_service_remove()`): process-level removal of all of
+- **BUG** (noted at `service_remove()`): process-level removal of all of
   a process's Services needs review. Also `service_count` should be
   coerced with `int()` when updated through ECProducer
 - `--primary` (forced take-over), `show`, `kill` CLI commands are
