@@ -416,19 +416,34 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
         self.service_cache = {}
         self.service_tags = None
 
-    def _filter(self, parent, service, topic_path, protocol):
+    def _service_parents(self, services):
+        # The parent of a Process is its Service with "service_id" 1. Collect
+        # the parent of every Process before any Service is filtered: the
+        # Services of all Processes share one list, in no Process order, so a
+        # parent carried through the list belongs to whichever Process held the
+        # last Service 1, which is not always this Service's Process.
+        # A Process has no parent while it has no Service 1, and "service_id"
+        # comes from a counter that only increases, so Service 1 does not
+        # return after it is removed
+        parents = {}
+        for service in services:
+            topic_path = aiko.ServiceTopicPath.parse(service[0])
+            if topic_path and topic_path.service_id == "1":
+                parents[topic_path.topic_path_process] =  \
+                    self._short_name(service[2]).split(":")[0]
+        return parents
+
+    def _filter(self, parents, topic_path, protocol):
         protocol = protocol.split(":")[0]
-        if topic_path.service_id == "1":
-            parent = (topic_path, protocol)
 
         show = protocol not in self.filter_out
         if topic_path.service_id != "1":
             if "sid>1" in self.filter_out:
                 show = False
             if "pipeline_element" in self.filter_out and  \
-                parent[1] and parent[1] == "pipeline":
+                parents.get(topic_path.topic_path_process) == "pipeline":
                 show = False
-        return parent, show
+        return show
 
     def _get_service_topic_path_next(self):
         service_topic_path_next = None
@@ -549,16 +564,16 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
         if self.adjust_palette_required:
             self._adjust_palette()
 
-        parent = (None, None)
         services_count = self.services_cache.get_services().count   # correct
         services = self.services_cache.get_services().copy()  # count is zero
+        parents = self._service_parents(services)
         services_formatted = []
         for service in services:
             topic_path = aiko.ServiceTopicPath.parse(service[0])
             topic_color = self._service_selection_color(
                 self.YELLOW, str(topic_path), topic_path.terse)
             protocol = self._short_name(service[2])
-            parent, show = self._filter(parent, service, topic_path, protocol)
+            show = self._filter(parents, topic_path, protocol)
             if show:
                 services_formatted.append(
                     (topic_color, service[1], service[4], protocol, service[3]))
@@ -593,14 +608,14 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
             for row_index, variable in enumerate(variables)
         ]
 
-        parent = (None, None)
         service_history = list(self.services_cache.get_history())
+        parents = self._service_parents(service_history)
         services_formatted = []
         for service in service_history:
             topic_path = aiko.ServiceTopicPath.parse(service[0])
             topic_terse = topic_path.terse
             protocol = self._short_name(service[2])
-            parent, show = self._filter(parent, service, topic_path, protocol)
+            show = self._filter(parents, topic_path, protocol)
             if show:
                 services_formatted.append(
                     (topic_terse, service[1], service[4], protocol, service[3]))
