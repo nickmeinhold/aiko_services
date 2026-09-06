@@ -258,11 +258,8 @@ class ProcessImplementation(ProcessData):
         try:
             self._services_lock.acquire("add_service()")
             self.service_count += 1
-            # Allocate from the monotonic counter, never from "service_count".
-            # "service_count" is decremented by remove_service(), so using it as
-            # the allocator reissues the id of a Service that is still live once
-            # a non-last Service has been removed: the new Service overwrites the
-            # previous holder in "_services" and the two share a topic_path
+            # Never allocate from "service_count": remove_service() decrements it,
+            # so it reissues an id that a live Service still holds
             self._service_id_last += 1
             service.service_id = self._service_id_last
             service.topic_path = aiko.get_topic_path(service.service_id)

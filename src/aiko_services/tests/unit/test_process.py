@@ -22,14 +22,17 @@
 # ~~~~~
 # - None, yet !
 
+import pytest
+
 import aiko_services as aiko
+from aiko_services.main.connection import Connection, ConnectionState
+from aiko_services.main.process import ProcessImplementation
 
 
 class ServiceStub:
     # A payload, not a Service: these tests exercise the allocator in
     # add_service() / remove_service(), which never inspects the object beyond
-    # "protocol". "protocol" is None so the Registrar publish is skipped, and
-    # no broker is needed
+    # "protocol"
     def __init__(self, label):
         self.label = label
         self.service_id = None
@@ -37,21 +40,33 @@ class ServiceStub:
         self.protocol = None
 
 
-def _fresh_process():
-    # "aiko.process" is a singleton shared across the suite, so each test resets
-    # it explicitly rather than unwinding through remove_service(): with the bug
-    # present, ids collide and "_services" loses entries, so an unwind leaves
-    # "service_count" drifted and later tests fail for the wrong reason
-    process = aiko.process
-    process._services.clear()
-    process.service_count = 0
-    process._service_id_last = 0
+@pytest.fixture
+def process():
+    # A private ProcessImplementation, never the "aiko.process" singleton that
+    # the rest of the suite shares. ProcessImplementation.__init__() only
+    # assigns attributes, so an instance that initialize() never touched has its
+    # own "_services", counters and lock, and nothing here has to be put back.
+    #
+    # "connection" is a ProcessData CLASS attribute, so a new instance still
+    # shares the singleton's Connection. Give this one its own, which starts at
+    # ConnectionState.NONE: add_service() and remove_service() then always skip
+    # the Registrar publish, whatever the environment, rather than depending on
+    # every stub remembering to leave "protocol" as None
+    process = ProcessImplementation()
+    process.connection = Connection("test_process")
     return process
 
 
-def test_service_ids_are_distinct_without_removals():
+def test_the_fixture_is_isolated_from_the_singleton(process):
+    # Control: if the fixture is not isolated, the tests below are mutating
+    # shared state and their results say nothing about the allocator
+    assert process is not aiko.process
+    assert process._services is not aiko.process._services
+    assert not process.connection.is_connected(ConnectionState.REGISTRAR)
+
+
+def test_service_ids_are_distinct_without_removals(process):
     # Control: if this ever fails, the tests below prove nothing
-    process = _fresh_process()
     a, b = ServiceStub("a"), ServiceStub("b")
     process.add_service(a)
     process.add_service(b)
@@ -60,8 +75,7 @@ def test_service_ids_are_distinct_without_removals():
     assert a.topic_path != b.topic_path
 
 
-def test_service_id_not_reused_after_remove():
-    process = _fresh_process()
+def test_service_id_not_reused_after_remove(process):
     a, b = ServiceStub("a"), ServiceStub("b")
     process.add_service(a)
     process.add_service(b)
@@ -77,8 +91,7 @@ def test_service_id_not_reused_after_remove():
         "two live Services share a topic_path"
 
 
-def test_live_service_survives_a_later_add():
-    process = _fresh_process()
+def test_live_service_survives_a_later_add(process):
     a, b = ServiceStub("a"), ServiceStub("b")
     process.add_service(a)
     process.add_service(b)
@@ -89,9 +102,8 @@ def test_live_service_survives_a_later_add():
         "a live Service was evicted from _services by a later add_service()"
 
 
-def test_service_count_still_tracks_live_services():
+def test_service_count_still_tracks_live_services(process):
     # The allocator changed; the public return value must not
-    process = _fresh_process()
     a = ServiceStub("a")
 
     assert process.add_service(a) == 1
