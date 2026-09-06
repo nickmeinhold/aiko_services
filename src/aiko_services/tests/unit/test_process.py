@@ -102,6 +102,25 @@ def test_live_service_survives_a_later_add(process):
         "a live Service was evicted from _services by a later add_service()"
 
 
+def test_ids_are_not_reused_after_every_service_is_removed(process):
+    # The gap is deliberate. Remove every Service and the next id is still the
+    # next one up, never 1 again, so a Service that outlives its Process's
+    # registry entry can never be confused with a later arrival. Pinned here so
+    # a later reader does not "repair" the gap as an accident
+    a = ServiceStub("a")
+    process.add_service(a)
+    process.remove_service(a.service_id)
+
+    assert process.service_count == 0, "no live Services remain"
+
+    b = ServiceStub("b")
+    process.add_service(b)
+
+    assert b.service_id != a.service_id, \
+        "the allocator restarted after the registry emptied"
+    assert b.service_id == a.service_id + 1
+
+
 def test_service_count_still_tracks_live_services(process):
     # The allocator changed; the public return value must not
     a = ServiceStub("a")
