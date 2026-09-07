@@ -44,6 +44,7 @@ class _Dashboard:
     # a Frame. Taken from DashboardFrame rather than copied, so this stub
     # cannot drift away from the code it stands in for
     _short_name = DashboardFrame._short_name
+    _protocol_base = DashboardFrame._protocol_base
     _service_parents = DashboardFrame._service_parents
     _filter = DashboardFrame._filter
 
@@ -104,6 +105,27 @@ def test_the_result_does_not_depend_on_the_order_of_the_services():
 
     assert sorted(_shown(dashboard, [a1, a2, b2])) == \
            sorted(_shown(dashboard, [b2, a1, a2]))
+
+
+def test_an_empty_service_list_has_no_parents_and_shows_nothing():
+    # The Dashboard runs before any Service is registered, and the parent pass
+    # must not assume the list has anything in it
+    dashboard = _dashboard(["pipeline_element"])
+
+    assert dashboard._service_parents([]) == {}
+    assert _shown(dashboard, []) == []
+
+
+def test_both_passes_reduce_a_protocol_the_same_way():
+    # The parent pass stores a reduced protocol and the filter reduces the one
+    # it is given. If those two ever disagree, a Pipeline stops being
+    # recognised as a parent and the filter silently stops working
+    dashboard = _dashboard([])
+    service = _service(f"{PROCESS_A}/1", PIPELINE)
+
+    parents = dashboard._service_parents([service])
+    assert parents[PROCESS_A] ==  \
+        dashboard._protocol_base(dashboard._short_name(service[2]))
 
 
 def test_a_reused_process_id_takes_the_last_parent_in_the_list():

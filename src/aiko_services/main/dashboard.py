@@ -416,6 +416,11 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
         self.service_cache = {}
         self.service_tags = None
 
+    def _protocol_base(self, protocol):
+        # The parent pass and the filter must reduce a protocol the same way.
+        # One function, so that is mechanical rather than a shared habit
+        return protocol.split(":")[0]
+
     def _service_parents(self, services):
         # Collect every Process's parent before filtering any Service: one
         # list holds the Services of all Processes, in no Process order.
@@ -429,11 +434,11 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
             topic_path = aiko.ServiceTopicPath.parse(service[0])
             if topic_path.service_id == "1":
                 parents[topic_path.topic_path_process] =  \
-                    self._short_name(service[2]).split(":")[0]
+                    self._protocol_base(self._short_name(service[2]))
         return parents
 
     def _filter(self, parents, topic_path, protocol):
-        protocol = protocol.split(":")[0]
+        protocol = self._protocol_base(protocol)
 
         show = protocol not in self.filter_out
         if topic_path.service_id != "1":
