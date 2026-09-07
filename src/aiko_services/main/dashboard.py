@@ -417,18 +417,17 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
         self.service_tags = None
 
     def _service_parents(self, services):
-        # The parent of a Process is its Service with "service_id" 1. Collect
-        # the parent of every Process before any Service is filtered: the
-        # Services of all Processes share one list, in no Process order, so a
-        # parent carried through the list belongs to whichever Process held the
-        # last Service 1, which is not always this Service's Process.
-        # A Process has no parent while it has no Service 1, and "service_id"
-        # comes from a counter that only increases, so Service 1 does not
-        # return after it is removed
+        # Collect every Process's parent before filtering any Service: one
+        # list holds the Services of all Processes, in no Process order.
+        # A Process with no Service 1 has no parent, because "service_id"
+        # comes from a counter that only increases.
+        # A Process key is "namespace/hostname/pid" and the history outlives a
+        # Process, so a reused process id puts two Processes under one key and
+        # the last one in the list wins
         parents = {}
         for service in services:
             topic_path = aiko.ServiceTopicPath.parse(service[0])
-            if topic_path and topic_path.service_id == "1":
+            if topic_path.service_id == "1":
                 parents[topic_path.topic_path_process] =  \
                     self._short_name(service[2]).split(":")[0]
         return parents

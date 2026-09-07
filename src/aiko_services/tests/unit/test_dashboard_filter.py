@@ -22,8 +22,6 @@
 # ~~~~~
 # - None, yet !
 
-import types
-
 from aiko_services.main.dashboard import DashboardFrame
 from aiko_services.main.service import ServiceTopicPath
 
@@ -40,23 +38,31 @@ def _service(topic_path, protocol):
     return (topic_path, "name", protocol, "transport", "owner")
 
 
+class _Dashboard:
+    # The three methods under test read "self.filter_out" and call
+    # "self._short_name()", and nothing else, so they run without a Screen or
+    # a Frame. Taken from DashboardFrame rather than copied, so this stub
+    # cannot drift away from the code it stands in for
+    _short_name = DashboardFrame._short_name
+    _service_parents = DashboardFrame._service_parents
+    _filter = DashboardFrame._filter
+
+    def __init__(self, filter_out):
+        self.filter_out = set(filter_out)
+
+
 def _dashboard(filter_out):
-    # The filter reads "self.filter_out" and calls "self._short_name()", and
-    # nothing else, so it runs without a Screen or a Frame
-    return types.SimpleNamespace(
-        filter_out=set(filter_out),
-        _short_name=DashboardFrame._short_name.__get__(object()),
-    )
+    return _Dashboard(filter_out)
 
 
 def _shown(dashboard, services):
     # Mirror the render loops: build the parents once, then filter each Service
-    parents = DashboardFrame._service_parents(dashboard, services)
+    parents = dashboard._service_parents(services)
     shown = []
     for service in services:
         topic_path = ServiceTopicPath.parse(service[0])
         protocol = dashboard._short_name(service[2])
-        if DashboardFrame._filter(dashboard, parents, topic_path, protocol):
+        if dashboard._filter(parents, topic_path, protocol):
             shown.append(service[0])
     return shown
 
@@ -98,6 +104,24 @@ def test_the_result_does_not_depend_on_the_order_of_the_services():
 
     assert sorted(_shown(dashboard, [a1, a2, b2])) == \
            sorted(_shown(dashboard, [b2, a1, a2]))
+
+
+def test_a_reused_process_id_takes_the_last_parent_in_the_list():
+    # A Process key is "namespace/hostname/pid". The history outlives a
+    # Process, so an operating system that reuses a process id can put two
+    # Processes under one key, each with its own Service 1. The last one in
+    # the list wins. Pinned because it is a choice, not an accident, and
+    # because the alternative, the first one winning, is equally arguable
+    dashboard = _dashboard(["pipeline_element"])
+    services = [
+        _service(f"{PROCESS_A}/1", ACTOR),      # the Process that stopped
+        _service(f"{PROCESS_A}/1", PIPELINE),   # the Process that reused its id
+        _service(f"{PROCESS_A}/2", ELEMENT),
+    ]
+
+    parents = dashboard._service_parents(services)
+    assert parents[PROCESS_A] == "pipeline"
+    assert f"{PROCESS_A}/2" not in _shown(dashboard, services)
 
 
 def test_service_1_is_never_hidden_by_the_sid_filter():
