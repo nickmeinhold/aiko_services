@@ -426,14 +426,23 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
         # list holds the Services of all Processes, in no Process order.
         # A Process with no Service 1 has no parent, because "service_id"
         # comes from a counter that only increases.
-        # Order independent on purpose: Service 1 does not have to arrive
-        # before the Services of its own Process
+        # Two Service 1 Services under one key are two Processes that an
+        # operating system gave the same process id, and nothing here says
+        # which Service belongs to which. That is less knowledge than one
+        # Service 1, not more, so the parent is unknown, the same as a Process
+        # with no Service 1 at all. Taking the last one would hide Services on
+        # the strength of where a Service sits in a list.
+        # So the answer never depends on the order of the list
         parents = {}
         for service in services:
             topic_path = aiko.ServiceTopicPath.parse(service[0])
             if topic_path.service_id == "1":
-                parents[topic_path.topic_path_process] =  \
-                    self._protocol_base(self._short_name(service[2]))
+                process = topic_path.topic_path_process
+                protocol = self._protocol_base(self._short_name(service[2]))
+                if process not in parents:
+                    parents[process] = protocol
+                elif parents[process] != protocol:
+                    parents[process] = None  # two Processes, one key
         return parents
 
     def _filter(self, parents, topic_path, protocol):

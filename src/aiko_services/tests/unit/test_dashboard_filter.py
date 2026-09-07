@@ -140,24 +140,39 @@ def test_where_a_service_1_sits_does_not_change_the_answer():
            dashboard._service_parents([element, parent])
 
 
-def test_two_processes_on_one_id_are_decided_by_list_order():
-    # The limit, stated as it really is rather than better than it is.
+def test_two_processes_on_one_id_have_no_parent_either_way():
     # The history keeps the Services of Processes that have stopped, so one
     # "namespace/hostname/pid" key can hold more than one Process once an
-    # operating system reuses a process id, and a Service carries nothing that
-    # says which one it belonged to. The last Service 1 in the list wins, so
-    # for this case, and only this case, the answer follows the order of the
-    # list. "share.py" writes the history from both ends, so that order is not
-    # defined, which makes the winner arbitrary. Separating them needs
-    # something on the Service that the list does not carry
+    # operating system reuses a process id. Two Service 1 Services under one
+    # key is less knowledge than one, not more, so the parent is unknown, and
+    # the Services are shown rather than hidden on the strength of which
+    # Service 1 happened to come last. "share.py" writes the history from both
+    # ends, so that order is not defined and must not decide what is displayed
     dashboard = _dashboard(["pipeline_element"])
     actor_1 = _service(f"{PROCESS_A}/1", ACTOR)
     pipeline_1 = _service(f"{PROCESS_A}/1", PIPELINE)
+    element = _service(f"{PROCESS_A}/2", ACTOR)
 
-    assert dashboard._service_parents([actor_1, pipeline_1]) ==  \
-        {PROCESS_A: "pipeline"}
-    assert dashboard._service_parents([pipeline_1, actor_1]) ==  \
-        {PROCESS_A: "actor"}
+    forwards = [actor_1, pipeline_1, element]
+    backwards = [pipeline_1, actor_1, element]
+
+    assert dashboard._service_parents(forwards) == {PROCESS_A: None}
+    assert dashboard._service_parents(backwards) == {PROCESS_A: None}
+    assert f"{PROCESS_A}/2" in _shown(dashboard, forwards)
+    assert f"{PROCESS_A}/2" in _shown(dashboard, backwards)
+
+
+def test_one_process_repeating_its_service_1_still_has_a_parent():
+    # Only a DIFFERENT protocol means two Processes. The same Service 1 listed
+    # twice is one Process, and its Services must still be filtered
+    dashboard = _dashboard(["pipeline_element"])
+    pipeline_1 = _service(f"{PROCESS_A}/1", PIPELINE)
+    element = _service(f"{PROCESS_A}/2", ACTOR)
+
+    services = [pipeline_1, pipeline_1, element]
+
+    assert dashboard._service_parents(services) == {PROCESS_A: "pipeline"}
+    assert f"{PROCESS_A}/2" not in _shown(dashboard, services)
 
 
 def test_service_1_is_never_hidden_by_the_sid_filter():
