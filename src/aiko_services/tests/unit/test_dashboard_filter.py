@@ -129,26 +129,35 @@ def test_both_passes_reduce_a_protocol_the_same_way():
         dashboard._protocol_base(dashboard._short_name(service[2]))
 
 
-def test_a_process_id_used_by_two_processes_cannot_be_separated():
-    # Recorded so the limit is explicit rather than discovered. The history
-    # keeps the Services of Processes that have stopped, so one
-    # "namespace/hostname/pid" key can hold more than one Process once an
-    # operating system reuses a process id. A Service carries its topic path
-    # and its protocol, and nothing that says which Process it belonged to, so
-    # the two lifetimes are one Process here. The parent of the last Service 1
-    # in the list is used for both, and the answer does not depend on the order
-    # of the list, which is what this asserts. Separating them needs something
-    # on the Service that this list does not carry
+def test_where_a_service_1_sits_does_not_change_the_answer():
+    # The parent of a Process is collected before any Service is filtered, so
+    # Service 1 does not have to arrive before the Services of its own Process
     dashboard = _dashboard(["pipeline_element"])
-    first = _service(f"{PROCESS_A}/1", ACTOR)
-    second = _service(f"{PROCESS_A}/1", PIPELINE)
+    parent = _service(f"{PROCESS_A}/1", PIPELINE)
     element = _service(f"{PROCESS_A}/2", ACTOR)
 
-    forwards = dashboard._service_parents([first, second, element])
-    backwards = dashboard._service_parents([element, first, second])
+    assert dashboard._service_parents([parent, element]) ==  \
+           dashboard._service_parents([element, parent])
 
-    assert forwards == backwards, \
-        "the parent of a Process depended on the order of the list"
+
+def test_two_processes_on_one_id_are_decided_by_list_order():
+    # The limit, stated as it really is rather than better than it is.
+    # The history keeps the Services of Processes that have stopped, so one
+    # "namespace/hostname/pid" key can hold more than one Process once an
+    # operating system reuses a process id, and a Service carries nothing that
+    # says which one it belonged to. The last Service 1 in the list wins, so
+    # for this case, and only this case, the answer follows the order of the
+    # list. "share.py" writes the history from both ends, so that order is not
+    # defined, which makes the winner arbitrary. Separating them needs
+    # something on the Service that the list does not carry
+    dashboard = _dashboard(["pipeline_element"])
+    actor_1 = _service(f"{PROCESS_A}/1", ACTOR)
+    pipeline_1 = _service(f"{PROCESS_A}/1", PIPELINE)
+
+    assert dashboard._service_parents([actor_1, pipeline_1]) ==  \
+        {PROCESS_A: "pipeline"}
+    assert dashboard._service_parents([pipeline_1, actor_1]) ==  \
+        {PROCESS_A: "actor"}
 
 
 def test_service_1_is_never_hidden_by_the_sid_filter():
