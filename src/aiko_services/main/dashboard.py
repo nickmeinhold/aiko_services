@@ -426,9 +426,8 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
         # list holds the Services of all Processes, in no Process order.
         # A Process with no Service 1 has no parent, because "service_id"
         # comes from a counter that only increases.
-        # Only for the live Services, where a process id belongs to one
-        # Process. The history needs the order sensitive form, and builds its
-        # own parents as it walks
+        # Order independent on purpose: Service 1 does not have to arrive
+        # before the Services of its own Process
         parents = {}
         for service in services:
             topic_path = aiko.ServiceTopicPath.parse(service[0])
@@ -612,22 +611,21 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
             for row_index, variable in enumerate(variables)
         ]
 
-        # The history keeps the Services of Processes that have stopped, and a
-        # Process key is "namespace/hostname/pid", so one key holds more than
-        # one Process once an operating system reuses a process id. Collect the
-        # parents as the list is walked, so each Service is judged by the
-        # Service 1 of its own Process most recently seen before it, and a
-        # later Process on the same key does not reach back over an earlier one
+        # The history keeps the Services of Processes that have stopped, so one
+        # "namespace/hostname/pid" key can hold more than one Process once an
+        # operating system reuses a process id, and a Service carries nothing
+        # that says which one it belongs to. No rule over this list can
+        # separate them. The parents are collected in a pass of their own, the
+        # same as the live Services, because the list is written from both ends
+        # (share.py appendleft on removal, append for the Registrar history) so
+        # its order says nothing about when a Service ran
         service_history = list(self.services_cache.get_history())
-        parents = {}
+        parents = self._service_parents(service_history)
         services_formatted = []
         for service in service_history:
             topic_path = aiko.ServiceTopicPath.parse(service[0])
             topic_terse = topic_path.terse
             protocol = self._short_name(service[2])
-            if topic_path.service_id == "1":
-                parents[topic_path.topic_path_process] =  \
-                    self._protocol_base(protocol)
             show = self._filter(parents, topic_path, protocol)
             if show:
                 services_formatted.append(

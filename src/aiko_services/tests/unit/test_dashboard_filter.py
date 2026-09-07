@@ -69,23 +69,6 @@ def _shown(dashboard, services):
     return shown
 
 
-def _shown_history(dashboard, services):
-    # Mirror the history loop: collect the parents while walking, so a Service
-    # is judged by the Service 1 of its own Process most recently seen before
-    # it. Returns indexes, because the history repeats a topic path
-    parents = {}
-    shown = []
-    for index, service in enumerate(services):
-        topic_path = ServiceTopicPath.parse(service[0])
-        protocol = dashboard._short_name(service[2])
-        if topic_path.service_id == "1":
-            parents[topic_path.topic_path_process] =  \
-                dashboard._protocol_base(protocol)
-        if dashboard._filter(parents, topic_path, protocol):
-            shown.append(index)
-    return shown
-
-
 def test_the_pipeline_element_filter_still_hides_its_own_pipelines_elements():
     # Control: if this fails, the filter is broken outright and the test below
     # proves nothing
@@ -146,37 +129,26 @@ def test_both_passes_reduce_a_protocol_the_same_way():
         dashboard._protocol_base(dashboard._short_name(service[2]))
 
 
-def test_history_judges_each_process_lifetime_by_its_own_service_1():
-    # A Process key is "namespace/hostname/pid" and the history outlives a
-    # Process, so one key holds more than one Process once an operating system
-    # reuses a process id. Here pid 100 is an Actor Process, and later a
-    # Pipeline Process. Only the Services of the Pipeline lifetime may be
-    # hidden by the "pipeline_element" filter. A parent collected for the whole
-    # list instead of while walking it reaches back over the earlier lifetime
-    # and hides row 1 as well
+def test_a_process_id_used_by_two_processes_cannot_be_separated():
+    # Recorded so the limit is explicit rather than discovered. The history
+    # keeps the Services of Processes that have stopped, so one
+    # "namespace/hostname/pid" key can hold more than one Process once an
+    # operating system reuses a process id. A Service carries its topic path
+    # and its protocol, and nothing that says which Process it belonged to, so
+    # the two lifetimes are one Process here. The parent of the last Service 1
+    # in the list is used for both, and the answer does not depend on the order
+    # of the list, which is what this asserts. Separating them needs something
+    # on the Service that this list does not carry
     dashboard = _dashboard(["pipeline_element"])
-    history = [
-        _service(f"{PROCESS_A}/1", ACTOR),     # the Actor Process
-        _service(f"{PROCESS_A}/2", ACTOR),     # its Service 2, must be shown
-        _service(f"{PROCESS_A}/1", PIPELINE),  # the Process that reused the id
-        _service(f"{PROCESS_A}/2", ACTOR),     # its Service 2, must be hidden
-    ]
+    first = _service(f"{PROCESS_A}/1", ACTOR)
+    second = _service(f"{PROCESS_A}/1", PIPELINE)
+    element = _service(f"{PROCESS_A}/2", ACTOR)
 
-    assert _shown_history(dashboard, history) == [0, 1, 2], \
-        "a later Process on a reused id changed the parent of an earlier one"
+    forwards = dashboard._service_parents([first, second, element])
+    backwards = dashboard._service_parents([element, first, second])
 
-
-def test_history_still_scopes_a_parent_to_its_own_process():
-    # The defect this change fixes, in the history view: Process B has no
-    # Service 1, so it has no parent and must not take the parent of Process A
-    dashboard = _dashboard(["pipeline_element"])
-    history = [
-        _service(f"{PROCESS_A}/1", PIPELINE),
-        _service(f"{PROCESS_B}/2", ACTOR),
-    ]
-
-    assert 1 in _shown_history(dashboard, history), \
-        "a Process with no Service 1 inherited another Process's parent"
+    assert forwards == backwards, \
+        "the parent of a Process depended on the order of the list"
 
 
 def test_service_1_is_never_hidden_by_the_sid_filter():
