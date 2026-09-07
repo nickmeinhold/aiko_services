@@ -57,7 +57,8 @@ def _dashboard(filter_out):
 
 
 def _shown(dashboard, services):
-    # Mirror the render loops: build the parents once, then filter each Service
+    # Mirror the live Services loop: collect the parents once, so the answer
+    # does not depend on where a Service 1 sits in the list
     parents = dashboard._service_parents(services)
     shown = []
     for service in services:
@@ -65,6 +66,23 @@ def _shown(dashboard, services):
         protocol = dashboard._short_name(service[2])
         if dashboard._filter(parents, topic_path, protocol):
             shown.append(service[0])
+    return shown
+
+
+def _shown_history(dashboard, services):
+    # Mirror the history loop: collect the parents while walking, so a Service
+    # is judged by the Service 1 of its own Process most recently seen before
+    # it. Returns indexes, because the history repeats a topic path
+    parents = {}
+    shown = []
+    for index, service in enumerate(services):
+        topic_path = ServiceTopicPath.parse(service[0])
+        protocol = dashboard._short_name(service[2])
+        if topic_path.service_id == "1":
+            parents[topic_path.topic_path_process] =  \
+                dashboard._protocol_base(protocol)
+        if dashboard._filter(parents, topic_path, protocol):
+            shown.append(index)
     return shown
 
 
@@ -128,22 +146,37 @@ def test_both_passes_reduce_a_protocol_the_same_way():
         dashboard._protocol_base(dashboard._short_name(service[2]))
 
 
-def test_a_reused_process_id_takes_the_last_parent_in_the_list():
-    # A Process key is "namespace/hostname/pid". The history outlives a
-    # Process, so an operating system that reuses a process id can put two
-    # Processes under one key, each with its own Service 1. The last one in
-    # the list wins. Pinned because it is a choice, not an accident, and
-    # because the alternative, the first one winning, is equally arguable
+def test_history_judges_each_process_lifetime_by_its_own_service_1():
+    # A Process key is "namespace/hostname/pid" and the history outlives a
+    # Process, so one key holds more than one Process once an operating system
+    # reuses a process id. Here pid 100 is an Actor Process, and later a
+    # Pipeline Process. Only the Services of the Pipeline lifetime may be
+    # hidden by the "pipeline_element" filter. A parent collected for the whole
+    # list instead of while walking it reaches back over the earlier lifetime
+    # and hides row 1 as well
     dashboard = _dashboard(["pipeline_element"])
-    services = [
-        _service(f"{PROCESS_A}/1", ACTOR),      # the Process that stopped
-        _service(f"{PROCESS_A}/1", PIPELINE),   # the Process that reused its id
-        _service(f"{PROCESS_A}/2", ELEMENT),
+    history = [
+        _service(f"{PROCESS_A}/1", ACTOR),     # the Actor Process
+        _service(f"{PROCESS_A}/2", ACTOR),     # its Service 2, must be shown
+        _service(f"{PROCESS_A}/1", PIPELINE),  # the Process that reused the id
+        _service(f"{PROCESS_A}/2", ACTOR),     # its Service 2, must be hidden
     ]
 
-    parents = dashboard._service_parents(services)
-    assert parents[PROCESS_A] == "pipeline"
-    assert f"{PROCESS_A}/2" not in _shown(dashboard, services)
+    assert _shown_history(dashboard, history) == [0, 1, 2], \
+        "a later Process on a reused id changed the parent of an earlier one"
+
+
+def test_history_still_scopes_a_parent_to_its_own_process():
+    # The defect this change fixes, in the history view: Process B has no
+    # Service 1, so it has no parent and must not take the parent of Process A
+    dashboard = _dashboard(["pipeline_element"])
+    history = [
+        _service(f"{PROCESS_A}/1", PIPELINE),
+        _service(f"{PROCESS_B}/2", ACTOR),
+    ]
+
+    assert 1 in _shown_history(dashboard, history), \
+        "a Process with no Service 1 inherited another Process's parent"
 
 
 def test_service_1_is_never_hidden_by_the_sid_filter():

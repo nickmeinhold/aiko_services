@@ -426,9 +426,9 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
         # list holds the Services of all Processes, in no Process order.
         # A Process with no Service 1 has no parent, because "service_id"
         # comes from a counter that only increases.
-        # A Process key is "namespace/hostname/pid" and the history outlives a
-        # Process, so a reused process id puts two Processes under one key and
-        # the last one in the list wins
+        # Only for the live Services, where a process id belongs to one
+        # Process. The history needs the order sensitive form, and builds its
+        # own parents as it walks
         parents = {}
         for service in services:
             topic_path = aiko.ServiceTopicPath.parse(service[0])
@@ -612,13 +612,22 @@ class DashboardFrame(FrameCommon, asciimatics_Frame):
             for row_index, variable in enumerate(variables)
         ]
 
+        # The history keeps the Services of Processes that have stopped, and a
+        # Process key is "namespace/hostname/pid", so one key holds more than
+        # one Process once an operating system reuses a process id. Collect the
+        # parents as the list is walked, so each Service is judged by the
+        # Service 1 of its own Process most recently seen before it, and a
+        # later Process on the same key does not reach back over an earlier one
         service_history = list(self.services_cache.get_history())
-        parents = self._service_parents(service_history)
+        parents = {}
         services_formatted = []
         for service in service_history:
             topic_path = aiko.ServiceTopicPath.parse(service[0])
             topic_terse = topic_path.terse
             protocol = self._short_name(service[2])
+            if topic_path.service_id == "1":
+                parents[topic_path.topic_path_process] =  \
+                    self._protocol_base(protocol)
             show = self._filter(parents, topic_path, protocol)
             if show:
                 services_formatted.append(
