@@ -359,6 +359,9 @@ class ServicesIterator:
         self._process_iterator = iter(self._services)
         self.iterate_process()
 
+    def __iter__(self):
+        return self
+
     def iterate_process(self):
         process_topic_path = self._process_iterator.__next__()
         self._process_services = self._services[process_topic_path]
