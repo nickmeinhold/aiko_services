@@ -22,6 +22,13 @@
 # carries. A test that asserts only that a publish occurred passes when the
 # payload names the wrong Service, because the wrong path publishes too.
 #
+# Every test that reads a count or a silence holds MORE THAN ONE Service,
+# and asserts the roster as well as the transport. One Service cannot tell
+# "acted on the Service named" from "acted on whichever Service is held"
+# from "acted on every Service", because the only Service in the list
+# answers to all three, and a silence with no Service in the list is a
+# Process that did nothing rather than a guard that held.
+#
 # Two Registrar topic paths, because one is not enough to tell the tests
 # apart. REGISTRAR_TOPIC_PATH is the Registrar a connected Process already
 # has. DISCOVERED_TOPIC_PATH is set by nothing but "on_registrar()" reading
@@ -204,22 +211,23 @@ def test_remove_service_publishes_remove_for_the_service_removed(
     payloads = message.payloads(REGISTRAR_TOPIC_IN)
     assert len(payloads) == 1
     assert parse(payloads[0]) == ("remove", [a.topic_path])
-    assert b.topic_path not in payloads[0]
 
 def test_removing_an_unknown_service_id_changes_nothing(process, message):
     # Silence on the wire is not proof of a no-op. A remove that evicts the
     # live Service and then has nothing left to announce is also silent, so
     # the roster has to be read as well as the transport
     _connect(process)
-    service = ServiceStub("a")
-    process.add_service(service)
+    a, b = ServiceStub("a"), ServiceStub("b")
+    process.add_service(a)
+    process.add_service(b)
     message.published.clear()
-    unknown_service_id = service.service_id + 1
+    unknown_service_id = b.service_id + 1
     assert unknown_service_id not in process._services
 
     process.remove_service(unknown_service_id)
 
-    assert process._services[service.service_id] is service
+    assert process._services[a.service_id] is a
+    assert process._services[b.service_id] is b
     assert message.payloads(REGISTRAR_TOPIC_IN) == []
 
 def test_adding_a_service_without_a_protocol_is_not_published(
@@ -229,12 +237,22 @@ def test_adding_a_service_without_a_protocol_is_not_published(
     # Service is still added, so the silence is the guard holding and not
     # an add that did nothing
     _connect(process)
-    service = ServiceStub("a", protocol=None)
+    speaking = ServiceStub("speaking")
+    process.add_service(speaking)
+    message.published.clear()
+    silent = ServiceStub("silent", protocol=None)
 
-    process.add_service(service)
+    process.add_service(silent)
 
-    assert process._services[service.service_id] is service
+    assert process._services[silent.service_id] is silent
     assert message.payloads(REGISTRAR_TOPIC_IN) == []
+    # The guard belongs to the Service without a protocol, not to the
+    # Process: the Service that has one is still published
+    another = ServiceStub("another")
+    process.add_service(another)
+    payloads = message.payloads(REGISTRAR_TOPIC_IN)
+    assert len(payloads) == 1
+    _assert_describes(payloads[0], another)
 
 def test_removing_a_service_without_a_protocol_is_not_published(
     process, message):
@@ -244,14 +262,25 @@ def test_removing_a_service_without_a_protocol_is_not_published(
     # remove together cannot tell two holding guards from a Service that
     # was never stored, so the two are separate tests
     _connect(process)
-    service = ServiceStub("a", protocol=None)
-    process.add_service(service)
-    assert service.service_id in process._services
+    speaking = ServiceStub("speaking")
+    silent = ServiceStub("silent", protocol=None)
+    process.add_service(speaking)
+    process.add_service(silent)
+    assert silent.service_id in process._services
     message.published.clear()
 
-    process.remove_service(service.service_id)
+    # The Service that HAS a protocol is removed first, while the Service
+    # without one is still held, because a Process-wide mute that reads the
+    # whole roster stops looking once the Service without a protocol is gone
+    process.remove_service(speaking.service_id)
 
-    assert service.service_id not in process._services
+    assert message.payloads(REGISTRAR_TOPIC_IN) ==  \
+        [f"(remove {speaking.topic_path})"]
+    message.published.clear()
+
+    process.remove_service(silent.service_id)
+
+    assert silent.service_id not in process._services
     assert message.payloads(REGISTRAR_TOPIC_IN) == []
 
 def test_on_registrar_found_republishes_every_service(process, message):
@@ -285,14 +314,18 @@ def test_on_registrar_found_tells_every_service_which_registrar(
     # A Service hears the action and the Registrar together. An action
     # without the Registrar is half of what happened
     process.connection.update_state(ConnectionState.TRANSPORT)
-    service = ServiceStub("a")
-    process.add_service(service)
+    a, b = ServiceStub("a"), ServiceStub("b")
+    process.add_service(a)
+    process.add_service(b)
 
     process.on_registrar(None, "topic", _found(DISCOVERED_TOPIC_PATH))
 
-    assert service.registrar_calls == [
-        ("found", {"topic_path": DISCOVERED_TOPIC_PATH,
-            "version": "0", "timestamp": "1757000000"})]
+    # Every Service, because a handler that notifies only the first, only
+    # the last, or only one copy satisfies a single-Service assertion
+    found_call = ("found", {"topic_path": DISCOVERED_TOPIC_PATH,
+        "version": "0", "timestamp": "1757000000"})
+    assert a.registrar_calls == [found_call]
+    assert b.registrar_calls == [found_call]
 
 def test_a_service_added_after_the_registrar_is_found_goes_to_it(
     process, message):
@@ -301,16 +334,21 @@ def test_a_service_added_after_the_registrar_is_found_goes_to_it(
     # only enter ConnectionState.REGISTRAR, it must publish to the Registrar
     # that the payload named
     process.connection.update_state(ConnectionState.TRANSPORT)
+    early = ServiceStub("early")
+    process.add_service(early)
     process.on_registrar(None, "topic", _found(DISCOVERED_TOPIC_PATH))
     assert process.connection.is_connected(ConnectionState.REGISTRAR)
+    message.published.clear()
 
-    service = ServiceStub("late")
-    process.add_service(service)
+    late = ServiceStub("late")
+    process.add_service(late)
 
     assert message.payloads(REGISTRAR_TOPIC_IN) == []
     payloads = message.payloads(DISCOVERED_TOPIC_IN)
+    # A Service is already held, so a count of one also rules out an add
+    # that republishes the whole roster
     assert len(payloads) == 1
-    _assert_describes(payloads[0], service)
+    _assert_describes(payloads[0], late)
 
 def test_on_registrar_absent_leaves_the_registrar_state(process, message):
     # The other half of the lifecycle. A Process that loses its Registrar
@@ -340,10 +378,14 @@ def test_nothing_is_published_after_the_registrar_goes_absent(
     # The state above is only worth having if it stops the publish
     process.connection.update_state(ConnectionState.TRANSPORT)
     process.on_registrar(None, "topic", _found(DISCOVERED_TOPIC_PATH))
+    process.add_service(ServiceStub("early"))
     process.on_registrar(None, "topic", "(primary absent)")
     message.published.clear()
 
-    process.add_service(ServiceStub("late"))
+    late = ServiceStub("late")
+    process.add_service(late)
 
+    # The zero is a closed gate only if the add really happened
+    assert process._services[late.service_id] is late
     assert message.payloads(DISCOVERED_TOPIC_IN) == []
     assert message.payloads(REGISTRAR_TOPIC_IN) == []
