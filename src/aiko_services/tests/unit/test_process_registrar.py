@@ -154,19 +154,38 @@ def test_nothing_is_published_while_the_registrar_is_absent(process, message):
 
     service = ServiceStub("a")
     process.add_service(service)
+    # The zero below is only a closed gate if the Service was really added.
+    # A disconnected add that did nothing at all reads the same way
+    assert service.service_id is not None
+    assert service.topic_path is not None
+    assert process._services[service.service_id] is service
+
     process.remove_service(service.service_id)
 
+    assert service.service_id not in process._services
     assert message.published == []
 
 def test_add_service_publishes_add(process, message):
+    # Two Services, added one after the other. With one Service on the
+    # Process, a count of one cannot tell "publishes the Service that was
+    # added" from "publishes whichever Service is held" or "publishes every
+    # Service on every add": the only body in the room answers to all three
     _connect(process)
-    service = ServiceStub("a")
+    a = ServiceStub("a")
 
-    process.add_service(service)
+    process.add_service(a)
 
     payloads = message.payloads(REGISTRAR_TOPIC_IN)
     assert len(payloads) == 1
-    _assert_describes(payloads[0], service)
+    _assert_describes(payloads[0], a)
+
+    b = ServiceStub("b")
+
+    process.add_service(b)
+
+    payloads = message.payloads(REGISTRAR_TOPIC_IN)
+    assert len(payloads) == 2, "the second add published more than itself"
+    _assert_describes(payloads[1], b)
 
 def test_remove_service_publishes_remove_for_the_service_removed(
     process, message):
@@ -187,24 +206,52 @@ def test_remove_service_publishes_remove_for_the_service_removed(
     assert parse(payloads[0]) == ("remove", [a.topic_path])
     assert b.topic_path not in payloads[0]
 
-def test_removing_an_unknown_service_id_publishes_nothing(process, message):
+def test_removing_an_unknown_service_id_changes_nothing(process, message):
+    # Silence on the wire is not proof of a no-op. A remove that evicts the
+    # live Service and then has nothing left to announce is also silent, so
+    # the roster has to be read as well as the transport
     _connect(process)
-    process.add_service(ServiceStub("a"))
+    service = ServiceStub("a")
+    process.add_service(service)
     message.published.clear()
+    unknown_service_id = service.service_id + 1
+    assert unknown_service_id not in process._services
 
-    process.remove_service(99)
+    process.remove_service(unknown_service_id)
 
+    assert process._services[service.service_id] is service
     assert message.payloads(REGISTRAR_TOPIC_IN) == []
 
-def test_a_service_without_a_protocol_is_not_published(process, message):
-    # Both Registrar calls guard on "service.protocol", so a Service that
-    # has none is added and removed without the Registrar hearing of it
+def test_adding_a_service_without_a_protocol_is_not_published(
+    process, message):
+
+    # "_add_service_to_registrar()" guards on "service.protocol". The
+    # Service is still added, so the silence is the guard holding and not
+    # an add that did nothing
     _connect(process)
     service = ServiceStub("a", protocol=None)
 
     process.add_service(service)
+
+    assert process._services[service.service_id] is service
+    assert message.payloads(REGISTRAR_TOPIC_IN) == []
+
+def test_removing_a_service_without_a_protocol_is_not_published(
+    process, message):
+
+    # The remove guard is its own guard, and it is only reached for a
+    # Service that was held. Asserting one empty list for an add and a
+    # remove together cannot tell two holding guards from a Service that
+    # was never stored, so the two are separate tests
+    _connect(process)
+    service = ServiceStub("a", protocol=None)
+    process.add_service(service)
+    assert service.service_id in process._services
+    message.published.clear()
+
     process.remove_service(service.service_id)
 
+    assert service.service_id not in process._services
     assert message.payloads(REGISTRAR_TOPIC_IN) == []
 
 def test_on_registrar_found_republishes_every_service(process, message):
