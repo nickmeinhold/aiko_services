@@ -325,6 +325,10 @@ def test_on_registrar_absent_leaves_the_registrar_state(process, message):
 
     process.on_registrar(None, "topic", "(primary absent)")
 
+    # A Registrar that goes away is not a Service that went away. Announcing
+    # a removal here would tell the next Registrar that a live Service is
+    # gone, so the transition itself must be silent
+    assert message.published == []
     assert ProcessData.registrar is None
     assert not process.connection.is_connected(ConnectionState.REGISTRAR)
     assert process.connection.get_state() == ConnectionState.TRANSPORT
